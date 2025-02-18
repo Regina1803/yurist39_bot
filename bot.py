@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import time
 from dotenv import load_dotenv
 from keep_alive import keep_alive
 
@@ -22,6 +23,19 @@ dp = Dispatcher(storage=storage)
 
 # Логирование
 logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+async def clean_old_data():
+    while True:
+        current_time = time.time()
+        to_delete = [
+            user_id for user_id, data in user_data.items()
+            if current_time - data.get("timestamp", 0) > 1800  # 30 минут
+        ]
+        for user_id in to_delete:
+            del user_data[user_id]
+            logger.info(f"Данные пользователя {user_id} удалены из памяти.")
+        await asyncio.sleep(600)  # Проверяем каждые 10 минут
 
 # Клавиатуры
 start_kb = ReplyKeyboardMarkup(
@@ -218,10 +232,20 @@ async def default_handler(message: types.Message):
     else:
         await message.answer("Неизвестная команда. Пожалуйста, следуйте инструкциям.")
 
+async def restart_bot():
+    while True:
+        try:
+            logger.info("Бот запущен!")
+            await dp.start_polling(bot)
+        except Exception as e:
+            logger.error(f"Бот упал с ошибкой: {e}")
+            await asyncio.sleep(5)  # Ждем перед перезапуском
+
 # Запуск бота
 async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    keep_alive()  # Для обеспечения «живости» (например, на Repl.it)
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+    loop.create_task(clean_old_data())  # Запуск задачи очистки памяти
+    loop.run_until_complete(restart_bot())
