@@ -195,7 +195,6 @@ async def forward_user_message_to_operator(message: types.Message):
         except Exception as e:
             logger.error(f"Ошибка пересылки сообщения оператору: {e}")
 
-
 # Команда оператора для ответа клиенту
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message, state: FSMContext):
@@ -215,13 +214,12 @@ async def operator_reply(message: types.Message, state: FSMContext):
             parse_mode="Markdown",
         )
         await message.answer("✅ Ответ отправлен пользователю.")
-        # Очищаем состояние пользователя, чтобы он мог снова отправлять сообщения
-        await state.clear()
+        # Вместо полного сброса состояния, устанавливаем его обратно
+        await state.set_state(ConsultationState.waiting_for_operator_reply)
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
         await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
-
 # Функция для безопасного перезапуска бота
 async def restart_bot():
     while True:
