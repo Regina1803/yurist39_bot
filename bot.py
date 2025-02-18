@@ -141,6 +141,12 @@ async def ask_phone(message: types.Message, state: FSMContext):
 async def process_phone(message: types.Message, state: FSMContext):
     await confirm_contact(message, state, phone_input=True)
 
+@dp.message(F.text == "Позвонить сразу")
+async def send_phone_number(message: types.Message):
+    phone_number = "+7 (911) 458-39-39"  # Укажите ваш номер телефона
+    await message.answer(
+        f"📞 Вы можете позвонить нам прямо сейчас: {phone_number}"
+    )
 # Вспомогательная функция для финализации запроса и отправки сообщения в группу поддержки
 async def confirm_contact(message: types.Message, state: FSMContext, phone_input: bool):
     if phone_input:
