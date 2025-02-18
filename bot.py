@@ -1,8 +1,11 @@
 import os
 import logging
 import asyncio
+import time
 import json
 from dotenv import load_dotenv
+from keep_alive import keep_alive
+
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.state import State, StatesGroup
@@ -27,40 +30,52 @@ dp = Dispatcher(storage=storage)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Функции для работы с Redis
+# Функция для сохранения данных в Redis
 def save_user_data(user_id, data):
-    redis_client.setex(f"user:{user_id}", 1800, json.dumps(data))  # 30 минут
+    redis_client.setex(f"user:{user_id}", 1800, json.dumps(data))  # Сохраняем на 30 минут
 
+# Функция для загрузки данных пользователя
 def get_user_data(user_id):
     data = redis_client.get(f"user:{user_id}")
     return json.loads(data) if data else {}
 
-# Очистка устаревших данных
+# Очистка устаревших данных (не нужна, так как Redis сам удаляет по TTL)
 async def clean_old_data():
     while True:
         logger.info("Очистка Redis выполняется автоматически по TTL")
-        await asyncio.sleep(600)  # Каждые 10 минут
+        await asyncio.sleep(600)  # Просто логируем каждые 10 минут
 
 # Клавиатуры
-start_kb = ReplyKeyboardMarkup([[KeyboardButton(text="Начать")]], resize_keyboard=True)
-city_kb = ReplyKeyboardMarkup([
-    [KeyboardButton(text="Калининград"), KeyboardButton(text="Калининградская область"), KeyboardButton(text="Другой город")]
-], resize_keyboard=True)
-role_kb = ReplyKeyboardMarkup([
-    [KeyboardButton(text="Физ лицо"), KeyboardButton(text="Юр лицо")]
-], resize_keyboard=True)
-contact_kb = ReplyKeyboardMarkup([
-    [KeyboardButton(text="В чате"), KeyboardButton(text="По телефону")]
-], resize_keyboard=True)
+start_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Начать")]], resize_keyboard=True
+)
+city_kb = ReplyKeyboardMarkup(
+    keyboard=[
+        [
+            KeyboardButton(text="Калининград"),
+            KeyboardButton(text="Калининградская область"),
+            KeyboardButton(text="Другой город"),
+        ]
+    ],
+    resize_keyboard=True,
+)
+role_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Физ лицо"), KeyboardButton(text="Юр лицо")]],
+    resize_keyboard=True,
+)
+contact_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="В чате"), KeyboardButton(text="По телефону")]],
+    resize_keyboard=True,
+)
 confirm_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Подождать звонка"), KeyboardButton(text="Позвонить сразу")]],
     resize_keyboard=True,
 )
+
 # Классы состояний
 class ConsultationState(StatesGroup):
     waiting_for_operator_reply = State()
 
-# Обработчик команды /start
 @dp.message(Command("start", ignore_case=True))
 async def start(message: types.Message):
     save_user_data(message.from_user.id, {})
@@ -69,12 +84,11 @@ async def start(message: types.Message):
         "Этот бот создан, чтобы помочь вам в решении юридических вопросов. 🏛️\n\n"
         "🔹 Просто оставьте заявку и укажите удобный способ связи.\n"
         "🔹 Наши специалисты рассмотрят ваш запрос и предложат оптимальное решение.\n\n"
-        "📌 <b>Нажмите кнопку ниже, чтобы начать.</b>",
+        "📌 <b>Нажмите кнопку ниже, чтобы начать.</b>", 
         reply_markup=start_kb,
         parse_mode="HTML"
     )
 
-# Вопросы пользователю
 @dp.message(F.text == "Начать")
 async def ask_city(message: types.Message):
     await message.answer("Из какого вы города?", reply_markup=city_kb)
@@ -118,27 +132,13 @@ async def ask_phone(message: types.Message, state: FSMContext):
     save_user_data(message.from_user.id, user_data)
 
     if user_data["contact_method"] == "По телефону":
-        await message.answer("Выберите удобный вариант:", reply_markup=confirm_kb)
+        await message.answer("Напишите ваш номер телефона.")
     else:
         await confirm_contact(message, state, phone_input=False)
 
-@dp.message(lambda m: "query" not in get_user_data(m.from_user.id))
-async def ask_phone(message: types.Message):
-    user_data = get_user_data(message.from_user.id)
-    user_data["query"] = message.text
-    save_user_data(message.from_user.id, user_data)
-
-    if user_data["contact_method"] == "По телефону":
-        await message.answer("Выберите удобный вариант:", reply_markup=confirm_kb)
-    else:
-        await confirm_contact(message)
-
-@dp.message(F.text.in_(["Подождать звонка", "Позвонить сразу"]))
-async def process_phone_choice(message: types.Message):
-    if message.text == "Подождать звонка":
-        await message.answer("✅ Ожидайте, с вами свяжется оператор в ближайшее время.")
-    else:
-        await message.answer("📞 Позвоните по номеру: +7 (911) 458-39-39")
+@dp.message(lambda m: get_user_data(m.from_user.id).get("contact_method") == "По телефону")
+async def process_phone(message: types.Message, state: FSMContext):
+    await confirm_contact(message, state, phone_input=True)
 
 async def confirm_contact(message: types.Message, state: FSMContext, phone_input: bool):
     user_data = get_user_data(message.from_user.id)
@@ -159,10 +159,32 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     if SUPPORT_GROUP_ID:
         await bot.send_message(SUPPORT_GROUP_ID, msg)
 
-    await message.answer("Ожидайте, с вами свяжется оператор в чате.")
+    if user_data["contact_method"] == "По телефону":
+        await message.answer(
+            "✅ Ваш запрос принят! Если не хотите ждать звонка, позвоните нам самостоятельно по номеру: \n📞 [ +7 (911) 458-39-39](tel:+79114583939)",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer("Ожидайте, с вами свяжется оператор в чате.")
+
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
-# Ответ оператора
+@dp.message(ConsultationState.waiting_for_operator_reply)
+async def forward_user_message_to_operator(message: types.Message):
+    """Пересылка сообщений от пользователя оператору в SUPPORT_GROUP_ID"""
+    user_data = get_user_data(message.from_user.id)
+
+    if SUPPORT_GROUP_ID:
+        await bot.send_message(
+            SUPPORT_GROUP_ID,
+            f"📩 *Новое сообщение от клиента:*\n\n"
+            f"👤 {user_data.get('name', 'Не указано')}\n"
+            f"📞 {user_data.get('phone', 'Не указан')}\n"
+            f"💬 {message.text}\n\n"
+            f"🆔 User ID: {message.from_user.id}",
+            parse_mode="Markdown",
+        )
+
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message, state: FSMContext):
     args = message.text.split(maxsplit=2)
@@ -170,21 +192,40 @@ async def operator_reply(message: types.Message, state: FSMContext):
         await message.reply("Используйте формат: /reply user_id текст")
         return
 
-    user_id, response_text = int(args[1]), args[2]
+    user_id_str = args[1]
+    response_text = args[2]
 
-    await bot.send_message(user_id, f"✉️ *Ответ от оператора:*\n\n{response_text}", parse_mode="Markdown")
-    await message.answer("✅ Ответ отправлен пользователю.")
-    await state.clear()
+    try:
+        user_id = int(user_id_str)
+        await bot.send_message(
+            user_id,
+            f"✉️ *Ответ от оператора:*\n\n{response_text}",
+            parse_mode="Markdown",
+        )
+        await message.answer("✅ Ответ отправлен пользователю.")
 
-# Перезапуск бота
+        # Очищаем состояние пользователя, чтобы он мог снова отправлять сообщения
+        await state.clear()
+
+    except ValueError:
+        await message.answer("❌ Ошибка: Некорректный user_id.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
+
+
 async def restart_bot():
     while True:
         try:
             logger.info("Бот запущен!")
             await dp.start_polling(bot)
         except Exception as e:
-            logger.error(f"Ошибка: {e}")
+            logger.error(f"Бот упал с ошибкой: {e}")
             await asyncio.sleep(5)
 
+async def main():
+    await dp.start_polling(bot)
+
 if __name__ == "__main__":
-    asyncio.run(restart_bot())
+    loop = asyncio.get_event_loop()
+    loop.create_task(clean_old_data())
+    loop.run_until_complete(restart_bot())
