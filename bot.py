@@ -18,7 +18,6 @@ TOKEN = os.getenv("BOT_TOKEN")
 SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID"))
 
 # Подключение к Redis
-
 redis_client = Redis(host='localhost', port=6379, decode_responses=True)
 storage = RedisStorage.from_url("redis://localhost:6379")
 
@@ -50,13 +49,11 @@ start_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Начать")]], resize_keyboard=True
 )
 city_kb = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(text="Калининград"),
-            KeyboardButton(text="Калининградская область"),
-            KeyboardButton(text="Другой город"),
-        ]
-    ],
+    keyboard=[[
+        KeyboardButton(text="Калининград"),
+        KeyboardButton(text="Москва"),
+        KeyboardButton(text="Другой город"),
+    ]],
     resize_keyboard=True,
 )
 role_kb = ReplyKeyboardMarkup(
@@ -67,15 +64,11 @@ contact_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="В чате"), KeyboardButton(text="По телефону")]],
     resize_keyboard=True,
 )
-# confirm_kb оставлен на случай будущего использования
-confirm_kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Подождать звонка"), KeyboardButton(text="Позвонить сразу")]],
-    resize_keyboard=True,
-)
 
 # Класс состояний для консультации
 class ConsultationState(StatesGroup):
     waiting_for_operator_reply = State()
+    waiting_for_user_reply = State()
 
 @dp.message(Command("start", ignore_case=True))
 async def start(message: types.Message):
@@ -118,7 +111,6 @@ async def ask_name(message: types.Message):
     else:
         await message.answer("Как к вам обращаться?")
 
-# Если имя/название компании ещё не сохранено – сохраняем его и запрашиваем описание ситуации
 @dp.message(lambda m: "name" not in get_user_data(m.from_user.id))
 async def ask_query(message: types.Message):
     user_data = get_user_data(message.from_user.id)
@@ -126,7 +118,6 @@ async def ask_query(message: types.Message):
     save_user_data(message.from_user.id, user_data)
     await message.answer("Укажите ваш запрос или ситуацию, с которой вы обращаетесь.")
 
-# Если запрос ещё не сохранён – сохраняем его и запрашиваем телефон (если выбран режим "По телефону")
 @dp.message(lambda m: "query" not in get_user_data(m.from_user.id))
 async def ask_phone(message: types.Message, state: FSMContext):
     user_data = get_user_data(message.from_user.id)
@@ -138,12 +129,10 @@ async def ask_phone(message: types.Message, state: FSMContext):
     else:
         await confirm_contact(message, state, phone_input=False)
 
-# Если выбран режим "По телефону", обрабатываем ввод номера телефона
 @dp.message(lambda m: get_user_data(m.from_user.id).get("contact_method") == "По телефону")
 async def process_phone(message: types.Message, state: FSMContext):
     await confirm_contact(message, state, phone_input=True)
 
-# Функция подтверждения и отправки данных о заявке
 async def confirm_contact(message: types.Message, state: FSMContext, phone_input: bool):
     user_data = get_user_data(message.from_user.id)
     user_data["phone"] = message.text if phone_input else "—"
@@ -175,13 +164,16 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     else:
         await message.answer("Ожидайте, с вами свяжется оператор в чате.")
 
+    # Сохраняем активную консультацию
+    user_data["consultation_active"] = True
+    save_user_data(message.from_user.id, user_data)
+
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
-# Пересылаем сообщения от пользователя оператору в SUPPORT_GROUP_ID
-# Пересылаем сообщения от пользователя оператору в SUPPORT_GROUP_ID
 @dp.message(F.chat.type == "private", F.text.not_startswith("/reply"))
-async def forward_user_message_to_operator(message: types.Message, state: FSMContext):
+async def forward_user_message_to_operator(message: types.Message):
     user_data = get_user_data(message.from_user.id)
+    
     if user_data.get("consultation_active"):
         try:
             await bot.send_message(
@@ -196,20 +188,8 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
         except Exception as e:
             logger.error(f"Ошибка пересылки сообщения оператору: {e}")
     else:
-        # Если консультация не активна, пользователь может продолжать чат
         await message.answer("Консультация завершена. Вы можете задать новый вопрос.")
 
-
-@dp.message(F.chat.type == "private")
-async def handle_message_after_consultation(message: types.Message):
-    user_data = get_user_data(message.from_user.id)
-    if not user_data.get("consultation_active"):
-        await message.answer("Если у вас возникнут дополнительные вопросы, напишите их здесь.")
-        # Можете добавить логику для сброса или изменения флага consultation_active
-    else:
-        await forward_user_message_to_operator(message)
-
-# Обработчик команды оператора для ответа клиенту (работает в группе поддержки)
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message):
     args = message.text.split(maxsplit=2)
@@ -226,38 +206,22 @@ async def operator_reply(message: types.Message):
             f"✉️ *Ответ от оператора:*\n\n{response_text}",
             parse_mode="Markdown",
         )
+
         # Обновляем флаг consultation_active на False или другую логику
         user_data = get_user_data(user_id)
         user_data["consultation_active"] = False  # Закрытие консультации
         save_user_data(user_id, user_data)
 
         await message.answer("✅ Ответ отправлен пользователю.")
-        # Теперь пользователь может продолжить отправлять сообщения
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
         await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
 
-# Функция для безопасного перезапуска бота
-async def restart_bot():
-    while True:
-        try:
-            logger.info("Бот запущен!")
-            await dp.start_polling(bot)
-        except Exception as e:
-            logger.error(f"Бот упал с ошибкой: {e}")
-        finally:
-            # Гарантированное закрытие сессии бота и хранилища состояний,
-            # чтобы избежать накопления неосвобождённых ресурсов
-            await bot.session.close()
-            await storage.close()
-        logger.info("Перезапуск через 5 секунд...")
-        await asyncio.sleep(5)
-
 # Основная функция запуска бота
 async def main():
     try:
-        await restart_bot()
+        await dp.start_polling(bot)
     except (KeyboardInterrupt, SystemExit):
         logger.info("Бот остановлен вручную.")
 
