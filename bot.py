@@ -81,11 +81,11 @@ class ConsultationState(StatesGroup):
 async def start(message: types.Message):
     save_user_data(message.from_user.id, {})
     await message.answer(
-        "👋 <b>Добро пожаловать!</b>\n\n"
+        "👋 Добро пожаловать!\n\n"
         "Этот бот создан, чтобы помочь вам в решении юридических вопросов. 🏛️\n\n"
         "🔹 Просто оставьте заявку и укажите удобный способ связи.\n"
         "🔹 Наши специалисты рассмотрят ваш запрос и предложат оптимальное решение.\n\n"
-        "📌 <b>Нажмите кнопку ниже, чтобы начать.</b>",
+        "📌 Нажмите кнопку ниже, чтобы начать.",
         reply_markup=start_kb,
     )
 
@@ -178,10 +178,10 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
 # Пересылаем сообщения от пользователя оператору в SUPPORT_GROUP_ID
-@dp.message(ConsultationState.waiting_for_operator_reply, F.chat.type == "private", F.text.not_startswith("/reply"))
-async def forward_user_message_to_operator(message: types.Message):
+@dp.message(F.chat.type == "private", F.text.not_startswith("/reply"))
+async def forward_user_message_to_operator(message: types.Message, state: FSMContext):
     user_data = get_user_data(message.from_user.id)
-    if SUPPORT_GROUP_ID:
+    if user_data.get("consultation_active"):
         try:
             await bot.send_message(
                 SUPPORT_GROUP_ID,
@@ -195,18 +195,15 @@ async def forward_user_message_to_operator(message: types.Message):
         except Exception as e:
             logger.error(f"Ошибка пересылки сообщения оператору: {e}")
 
-# Обработчик команды оператора для ответа клиенту.
-# Этот обработчик вызывается из группы поддержки и не меняет состояние клиента.
+# Обработчик команды оператора для ответа клиенту (работает в группе поддержки)
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message):
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
         await message.reply("Используйте формат: /reply user_id текст")
         return
-
     user_id_str = args[1]
     response_text = args[2]
-
     try:
         user_id = int(user_id_str)
         await bot.send_message(
@@ -215,13 +212,12 @@ async def operator_reply(message: types.Message):
             parse_mode="Markdown",
         )
         await message.answer("✅ Ответ отправлен пользователю.")
-        # Важно: здесь не трогаем FSM-контекст оператора,
-        # состояние клиента (в его личном чате) остаётся в ConsultationState.waiting_for_operator_reply
+        # Флаг consultation_active остаётся выставленным,
+        # поэтому любые последующие сообщения клиента будут пересланы операторам.
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
         await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
-
 # Функция для безопасного перезапуска бота
 async def restart_bot():
     while True:
