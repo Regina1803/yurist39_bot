@@ -171,11 +171,12 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
 @dp.message(F.chat.type == "private", F.text.not_startswith("/reply"))
-async def forward_user_message_to_operator(message: types.Message):
+async def forward_user_message_to_operator(message: types.Message, state: FSMContext):
     user_data = get_user_data(message.from_user.id)
-    
+
     if user_data.get("consultation_active"):
         try:
+            # Пересылаем сообщение пользователя оператору
             await bot.send_message(
                 SUPPORT_GROUP_ID,
                 f"📩 *Новое сообщение от клиента:*\n\n"
@@ -196,6 +197,7 @@ async def operator_reply(message: types.Message):
     if len(args) < 3:
         await message.reply("Используйте формат: /reply user_id текст")
         return
+
     user_id_str = args[1]
     response_text = args[2]
     try:
@@ -207,17 +209,38 @@ async def operator_reply(message: types.Message):
             parse_mode="Markdown",
         )
 
-        # Обновляем флаг consultation_active на False или другую логику
+        # Обновляем данные пользователя и флаг консультации
         user_data = get_user_data(user_id)
-        user_data["consultation_active"] = False  # Закрытие консультации
+        user_data["consultation_active"] = True  # Оператор ответил, консультация продолжается
         save_user_data(user_id, user_data)
 
         await message.answer("✅ Ответ отправлен пользователю.")
+        # Теперь пользователь может продолжить отправлять сообщения
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
         await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
 
+@dp.message(F.chat.type == "private", F.text.startswith("/reply"))
+async def handle_reply_from_user(message: types.Message, state: FSMContext):
+    user_data = get_user_data(message.from_user.id)
+
+    if user_data.get("consultation_active"):
+        try:
+            # Пересылаем сообщение пользователя оператору в чат
+            await bot.send_message(
+                SUPPORT_GROUP_ID,
+                f"📩 *Ответ от клиента:*\n\n"
+                f"👤 {user_data.get('name', 'Не указано')}\n"
+                f"📞 {user_data.get('phone', 'Не указан')}\n"
+                f"💬 {message.text}\n\n"
+                f"🆔 User ID: {message.from_user.id}",
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.error(f"Ошибка пересылки сообщения оператору: {e}")
+    else:
+        await message.answer("Консультация завершена. Вы можете задать новый вопрос.")
 # Основная функция запуска бота
 async def main():
     try:
