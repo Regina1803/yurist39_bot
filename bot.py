@@ -17,7 +17,7 @@ SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID"))
 redis_client = Redis(host='localhost', port=6379, decode_responses=True)
 storage = RedisStorage.from_url("redis://localhost:6379")
 
-bot = Bot(token=TOKEN, parse_mode="HTML")
+bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=storage)
 
 # Логирование
