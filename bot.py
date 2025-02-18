@@ -163,7 +163,7 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
 @dp.message(Command("reply", ignore_case=True))
-async def operator_reply(message: types.Message):
+async def operator_reply(message: types.Message, state: FSMContext):
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
         await message.reply("Используйте формат: /reply user_id текст")
@@ -180,6 +180,10 @@ async def operator_reply(message: types.Message):
             parse_mode="Markdown",
         )
         await message.answer("✅ Ответ отправлен пользователю.")
+        
+        # Сброс состояния, чтобы пользователь мог отправлять новые сообщения
+        await state.clear()
+    
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
