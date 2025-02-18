@@ -4,7 +4,7 @@ import asyncio
 import time
 import json
 from dotenv import load_dotenv
-from keep_alive import keep_alive
+
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -27,7 +27,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=storage)
 
 # Логирование
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 # Функция для сохранения данных в Redis
@@ -39,11 +39,6 @@ def get_user_data(user_id):
     data = redis_client.get(f"user:{user_id}")
     return json.loads(data) if data else {}
 
-# Очистка устаревших данных (не нужна, так как Redis сам удаляет по TTL)
-async def clean_old_data():
-    while True:
-        logger.info("Очистка Redis выполняется автоматически по TTL")
-        await asyncio.sleep(600)  # Просто логируем каждые 10 минут
 
 # Клавиатуры
 start_kb = ReplyKeyboardMarkup(
@@ -223,7 +218,7 @@ async def restart_bot():
             await asyncio.sleep(5)
 
 async def main():
-    await dp.start_polling(bot)
+    await dp.run_polling(bot)
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
