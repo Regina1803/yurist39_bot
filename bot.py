@@ -221,11 +221,6 @@ async def main():
     await dp.run_polling(bot)
 
 if __name__ == "__main__":
-    import asyncio
-
-    try:
-        asyncio.run(main())  # Работает в обычных скриптах
-    except RuntimeError:  # Если event loop уже запущен
-        loop = asyncio.get_event_loop()
-        loop.create_task(main())  # Запускаем в текущем event loop
-        loop.run_forever()  # Поддерживаем выполнение
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(main())
