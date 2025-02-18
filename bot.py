@@ -162,6 +162,27 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     await message.answer("Ожидайте, с вами свяжется оператор в чате.")
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
+@dp.message(Command("reply", ignore_case=True))
+async def operator_reply(message: types.Message):
+    args = message.text.split(maxsplit=2)
+    if len(args) < 3:
+        await message.reply("Используйте формат: /reply user_id текст")
+        return
+    try:
+        user_id = int(user_id)
+        response_text = args[2]
+        await bot.send_message(
+            user_id,
+            f"✉️ *Ответ от оператора:*\n\n{response_text}",
+            parse_mode="Markdown",
+        )
+        await message.answer("✅ Ответ отправлен пользователю.")
+    except ValueError:
+        await message.answer("❌ Ошибка: Некорректный user_id.")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
+
+
 async def restart_bot():
     while True:
         try:
