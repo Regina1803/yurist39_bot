@@ -198,6 +198,7 @@ async def forward_user_message_to_operator(message: types.Message):
 # Команда оператора для ответа клиенту
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message, state: FSMContext):
+    # Parse the command arguments
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
         await message.reply("Используйте формат: /reply user_id текст")
@@ -207,20 +208,33 @@ async def operator_reply(message: types.Message, state: FSMContext):
     response_text = args[2]
 
     try:
+        # Validate the user_id
         user_id = int(user_id_str)
+
+        # Check if the user_id exists in Redis (optional but recommended)
+        user_data = get_user_data(user_id)
+        if not user_data:
+            await message.answer(f"❌ Пользователь с ID {user_id} не найден в базе данных.")
+            return
+
+        # Send the message to the user
         await bot.send_message(
             user_id,
             f"✉️ *Ответ от оператора:*\n\n{response_text}",
             parse_mode="Markdown",
         )
+
+        # Notify the operator that the message was sent successfully
         await message.answer("✅ Ответ отправлен пользователю.")
-        # Очищаем состояние пользователя, чтобы он мог снова отправлять сообщения
+
+        # Clear the user's state to allow them to initiate a new consultation
         await state.clear()
+
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
+        logger.error(f"Ошибка при отправке сообщения пользователю {user_id}: {e}")
         await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
-
 # Функция для безопасного перезапуска бота
 async def restart_bot():
     while True:
