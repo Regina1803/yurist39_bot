@@ -178,7 +178,7 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
 # Пересылаем сообщения от пользователя оператору в SUPPORT_GROUP_ID
-@dp.message(ConsultationState.waiting_for_operator_reply, F.text.not_startswith("/reply"))
+@dp.message(ConsultationState.waiting_for_operator_reply, F.chat.type == "private", F.text.not_startswith("/reply"))
 async def forward_user_message_to_operator(message: types.Message):
     user_data = get_user_data(message.from_user.id)
     if SUPPORT_GROUP_ID:
@@ -195,9 +195,10 @@ async def forward_user_message_to_operator(message: types.Message):
         except Exception as e:
             logger.error(f"Ошибка пересылки сообщения оператору: {e}")
 
-# Команда оператора для ответа клиенту
+# Обработчик команды оператора для ответа клиенту.
+# Этот обработчик вызывается из группы поддержки и не меняет состояние клиента.
 @dp.message(Command("reply", ignore_case=True))
-async def operator_reply(message: types.Message, state: FSMContext):
+async def operator_reply(message: types.Message):
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
         await message.reply("Используйте формат: /reply user_id текст")
@@ -214,12 +215,13 @@ async def operator_reply(message: types.Message, state: FSMContext):
             parse_mode="Markdown",
         )
         await message.answer("✅ Ответ отправлен пользователю.")
-        # Вместо полного сброса состояния, устанавливаем его обратно
-        await state.set_state(ConsultationState.waiting_for_operator_reply)
+        # Важно: здесь не трогаем FSM-контекст оператора,
+        # состояние клиента (в его личном чате) остаётся в ConsultationState.waiting_for_operator_reply
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
         await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
+
 # Функция для безопасного перезапуска бота
 async def restart_bot():
     while True:
