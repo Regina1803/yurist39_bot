@@ -178,6 +178,7 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
 # Пересылаем сообщения от пользователя оператору в SUPPORT_GROUP_ID
+# Пересылаем сообщения от пользователя оператору в SUPPORT_GROUP_ID
 @dp.message(F.chat.type == "private", F.text.not_startswith("/reply"))
 async def forward_user_message_to_operator(message: types.Message, state: FSMContext):
     user_data = get_user_data(message.from_user.id)
@@ -194,6 +195,19 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
             )
         except Exception as e:
             logger.error(f"Ошибка пересылки сообщения оператору: {e}")
+    else:
+        # Если консультация не активна, пользователь может продолжать чат
+        await message.answer("Консультация завершена. Вы можете задать новый вопрос.")
+
+
+@dp.message(F.chat.type == "private")
+async def handle_message_after_consultation(message: types.Message):
+    user_data = get_user_data(message.from_user.id)
+    if not user_data.get("consultation_active"):
+        await message.answer("Если у вас возникнут дополнительные вопросы, напишите их здесь.")
+        # Можете добавить логику для сброса или изменения флага consultation_active
+    else:
+        await forward_user_message_to_operator(message)
 
 # Обработчик команды оператора для ответа клиенту (работает в группе поддержки)
 @dp.message(Command("reply", ignore_case=True))
@@ -206,18 +220,24 @@ async def operator_reply(message: types.Message):
     response_text = args[2]
     try:
         user_id = int(user_id_str)
+        # Отправляем ответ пользователю
         await bot.send_message(
             user_id,
             f"✉️ *Ответ от оператора:*\n\n{response_text}",
             parse_mode="Markdown",
         )
+        # Обновляем флаг consultation_active на False или другую логику
+        user_data = get_user_data(user_id)
+        user_data["consultation_active"] = False  # Закрытие консультации
+        save_user_data(user_id, user_data)
+
         await message.answer("✅ Ответ отправлен пользователю.")
-        # Флаг consultation_active остаётся выставленным,
-        # поэтому любые последующие сообщения клиента будут пересланы операторам.
+        # Теперь пользователь может продолжить отправлять сообщения
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
         await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
+
 # Функция для безопасного перезапуска бота
 async def restart_bot():
     while True:
