@@ -1,10 +1,8 @@
 import os
 import logging
 import asyncio
-import time
 import json
 from dotenv import load_dotenv
-
 
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -20,27 +18,34 @@ TOKEN = os.getenv("BOT_TOKEN")
 SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID"))
 
 # Подключение к Redis
+
 redis_client = Redis(host='localhost', port=6379, decode_responses=True)
 storage = RedisStorage.from_url("redis://localhost:6379")
 
-bot = Bot(token=TOKEN)
+bot = Bot(token=TOKEN, parse_mode="HTML")
 dp = Dispatcher(storage=storage)
 
-# Логирование
-logging.basicConfig(level=logging.ERROR)
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Функция для сохранения данных в Redis
+# Функция для сохранения данных в Redis с обработкой исключений
 def save_user_data(user_id, data):
-    redis_client.setex(f"user:{user_id}", 1800, json.dumps(data))  # Сохраняем на 30 минут
+    try:
+        redis_client.setex(f"user:{user_id}", 1800, json.dumps(data))  # Сохраняем на 30 минут
+    except Exception as e:
+        logger.error(f"Ошибка сохранения данных пользователя {user_id}: {e}")
 
-# Функция для загрузки данных пользователя
+# Функция для загрузки данных пользователя с обработкой исключений
 def get_user_data(user_id):
-    data = redis_client.get(f"user:{user_id}")
-    return json.loads(data) if data else {}
+    try:
+        data = redis_client.get(f"user:{user_id}")
+        return json.loads(data) if data else {}
+    except Exception as e:
+        logger.error(f"Ошибка загрузки данных пользователя {user_id}: {e}")
+        return {}
 
-
-# Клавиатуры
+# Определяем клавиатуры
 start_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Начать")]], resize_keyboard=True
 )
@@ -62,12 +67,13 @@ contact_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="В чате"), KeyboardButton(text="По телефону")]],
     resize_keyboard=True,
 )
+# confirm_kb оставлен на случай будущего использования
 confirm_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Подождать звонка"), KeyboardButton(text="Позвонить сразу")]],
     resize_keyboard=True,
 )
 
-# Классы состояний
+# Класс состояний для консультации
 class ConsultationState(StatesGroup):
     waiting_for_operator_reply = State()
 
@@ -79,9 +85,8 @@ async def start(message: types.Message):
         "Этот бот создан, чтобы помочь вам в решении юридических вопросов. 🏛️\n\n"
         "🔹 Просто оставьте заявку и укажите удобный способ связи.\n"
         "🔹 Наши специалисты рассмотрят ваш запрос и предложат оптимальное решение.\n\n"
-        "📌 <b>Нажмите кнопку ниже, чтобы начать.</b>", 
+        "📌 <b>Нажмите кнопку ниже, чтобы начать.</b>",
         reply_markup=start_kb,
-        parse_mode="HTML"
     )
 
 @dp.message(F.text == "Начать")
@@ -108,11 +113,12 @@ async def ask_name(message: types.Message):
     user_data["contact_method"] = message.text
     save_user_data(message.from_user.id, user_data)
     
-    if user_data["role"] == "Юр лицо":
+    if user_data.get("role") == "Юр лицо":
         await message.answer("Напишите название вашей компании.")
     else:
         await message.answer("Как к вам обращаться?")
 
+# Если имя/название компании ещё не сохранено – сохраняем его и запрашиваем описание ситуации
 @dp.message(lambda m: "name" not in get_user_data(m.from_user.id))
 async def ask_query(message: types.Message):
     user_data = get_user_data(message.from_user.id)
@@ -120,21 +126,24 @@ async def ask_query(message: types.Message):
     save_user_data(message.from_user.id, user_data)
     await message.answer("Укажите ваш запрос или ситуацию, с которой вы обращаетесь.")
 
+# Если запрос ещё не сохранён – сохраняем его и запрашиваем телефон (если выбран режим "По телефону")
 @dp.message(lambda m: "query" not in get_user_data(m.from_user.id))
 async def ask_phone(message: types.Message, state: FSMContext):
     user_data = get_user_data(message.from_user.id)
     user_data["query"] = message.text
     save_user_data(message.from_user.id, user_data)
 
-    if user_data["contact_method"] == "По телефону":
+    if user_data.get("contact_method") == "По телефону":
         await message.answer("Напишите ваш номер телефона.")
     else:
         await confirm_contact(message, state, phone_input=False)
 
+# Если выбран режим "По телефону", обрабатываем ввод номера телефона
 @dp.message(lambda m: get_user_data(m.from_user.id).get("contact_method") == "По телефону")
 async def process_phone(message: types.Message, state: FSMContext):
     await confirm_contact(message, state, phone_input=True)
 
+# Функция подтверждения и отправки данных о заявке
 async def confirm_contact(message: types.Message, state: FSMContext, phone_input: bool):
     user_data = get_user_data(message.from_user.id)
     user_data["phone"] = message.text if phone_input else "—"
@@ -152,11 +161,15 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
     )
 
     if SUPPORT_GROUP_ID:
-        await bot.send_message(SUPPORT_GROUP_ID, msg)
+        try:
+            await bot.send_message(SUPPORT_GROUP_ID, msg)
+        except Exception as e:
+            logger.error(f"Ошибка отправки сообщения в группу поддержки: {e}")
 
-    if user_data["contact_method"] == "По телефону":
+    if user_data.get("contact_method") == "По телефону":
         await message.answer(
-            "✅ Ваш запрос принят! Если не хотите ждать звонка, позвоните нам самостоятельно по номеру: \n📞 [ +7 (911) 458-39-39](tel:+79114583939)",
+            "✅ Ваш запрос принят! Если не хотите ждать звонка, позвоните нам самостоятельно по номеру: \n"
+            "📞 [ +7 (911) 458-39-39](tel:+79114583939)",
             parse_mode="Markdown"
         )
     else:
@@ -164,22 +177,25 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
 
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
+# Пересылаем сообщения от пользователя оператору в SUPPORT_GROUP_ID
 @dp.message(ConsultationState.waiting_for_operator_reply)
 async def forward_user_message_to_operator(message: types.Message):
-    """Пересылка сообщений от пользователя оператору в SUPPORT_GROUP_ID"""
     user_data = get_user_data(message.from_user.id)
-
     if SUPPORT_GROUP_ID:
-        await bot.send_message(
-            SUPPORT_GROUP_ID,
-            f"📩 *Новое сообщение от клиента:*\n\n"
-            f"👤 {user_data.get('name', 'Не указано')}\n"
-            f"📞 {user_data.get('phone', 'Не указан')}\n"
-            f"💬 {message.text}\n\n"
-            f"🆔 User ID: {message.from_user.id}",
-            parse_mode="Markdown",
-        )
+        try:
+            await bot.send_message(
+                SUPPORT_GROUP_ID,
+                f"📩 *Новое сообщение от клиента:*\n\n"
+                f"👤 {user_data.get('name', 'Не указано')}\n"
+                f"📞 {user_data.get('phone', 'Не указан')}\n"
+                f"💬 {message.text}\n\n"
+                f"🆔 User ID: {message.from_user.id}",
+                parse_mode="Markdown",
+            )
+        except Exception as e:
+            logger.error(f"Ошибка пересылки сообщения оператору: {e}")
 
+# Команда оператора для ответа клиенту
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message, state: FSMContext):
     args = message.text.split(maxsplit=2)
@@ -198,16 +214,14 @@ async def operator_reply(message: types.Message, state: FSMContext):
             parse_mode="Markdown",
         )
         await message.answer("✅ Ответ отправлен пользователю.")
-
         # Очищаем состояние пользователя, чтобы он мог снова отправлять сообщения
         await state.clear()
-
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
         await message.answer(f"❌ Ошибка при отправке сообщения: {e}")
 
-
+# Функция для безопасного перезапуска бота
 async def restart_bot():
     while True:
         try:
@@ -215,10 +229,23 @@ async def restart_bot():
             await dp.start_polling(bot)
         except Exception as e:
             logger.error(f"Бот упал с ошибкой: {e}")
-            await asyncio.sleep(5)
+        finally:
+            # Гарантированное закрытие сессии бота и хранилища состояний,
+            # чтобы избежать накопления неосвобождённых ресурсов
+            await bot.session.close()
+            await storage.close()
+        logger.info("Перезапуск через 5 секунд...")
+        await asyncio.sleep(5)
 
+# Основная функция запуска бота
 async def main():
-    await dp.run_polling(bot)
+    try:
+        await restart_bot()
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Бот остановлен вручную.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logger.info("Программа завершена.")
