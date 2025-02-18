@@ -168,9 +168,12 @@ async def operator_reply(message: types.Message):
     if len(args) < 3:
         await message.reply("Используйте формат: /reply user_id текст")
         return
+    
+    user_id_str = args[1]  # Объявляем user_id как строку перед try
+    response_text = args[2]
+
     try:
-        user_id = int(user_id)
-        response_text = args[2]
+        user_id = int(user_id_str)
         await bot.send_message(
             user_id,
             f"✉️ *Ответ от оператора:*\n\n{response_text}",
