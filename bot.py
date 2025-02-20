@@ -218,16 +218,19 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
 @dp.callback_query(F.data.startswith("reply_"))
 async def process_reply_button(callback: types.CallbackQuery):
     user_id = int(callback.data.split("_")[1])
-    
+
+    cancel_button = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel_reply")]
+    ])
+
     await callback.message.answer(
         f"✏️ Напишите ответ для пользователя {user_id}:",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("Отмена", callback_data="cancel_reply")
-        )
+        reply_markup=cancel_button
     )
 
     # Сохраняем user_id оператора для последующего ответа
     await dp.current_state(user=callback.from_user.id).update_data(reply_to=user_id)
+
 
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message, state: FSMContext):
