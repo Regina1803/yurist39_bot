@@ -195,11 +195,10 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
     user_data = get_user_data(message.from_user.id)
 
     if user_data.get("consultation_active"):
-        reply_button = InlineKeyboardMarkup().add(
-            InlineKeyboardButton(
-                "Ответить", callback_data=f"reply_{message.from_user.id}"
-            )
-        )
+        reply_button = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Ответить", callback_data=f"reply_{message.from_user.id}")]
+        ])
+
         try:
             await bot.send_message(
                 SUPPORT_GROUP_ID,
