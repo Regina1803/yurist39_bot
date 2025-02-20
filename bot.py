@@ -170,13 +170,12 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
 
     await state.set_state(ConsultationState.waiting_for_operator_reply)
 
-@dp.message(F.chat.type == "private", F.text.not_startswith("/reply"))
+@dp.message(F.chat.type == "private", ConsultationState.waiting_for_operator_reply)
 async def forward_user_message_to_operator(message: types.Message, state: FSMContext):
     user_data = get_user_data(message.from_user.id)
 
     if user_data.get("consultation_active"):
         try:
-            # Пересылаем сообщение пользователя оператору
             await bot.send_message(
                 SUPPORT_GROUP_ID,
                 f"📩 *Новое сообщение от клиента:*\n\n"
@@ -189,10 +188,10 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
         except Exception as e:
             logger.error(f"Ошибка пересылки сообщения оператору: {e}")
     else:
-        await message.answer("Консультация завершена. Вы можете задать новый вопрос.")
+        await message.answer("Вы можете задать новый вопрос.")
 
 @dp.message(Command("reply", ignore_case=True))
-async def operator_reply(message: types.Message):
+async def operator_reply(message: types.Message, state: FSMContext):
     args = message.text.split(maxsplit=2)
     if len(args) < 3:
         await message.reply("Используйте формат: /reply user_id текст")
@@ -202,20 +201,19 @@ async def operator_reply(message: types.Message):
     response_text = args[2]
     try:
         user_id = int(user_id_str)
-        # Отправляем ответ пользователю
         await bot.send_message(
             user_id,
             f"✉️ *Ответ от оператора:*\n\n{response_text}",
             parse_mode="Markdown",
         )
 
-        # Обновляем данные пользователя и флаг консультации
         user_data = get_user_data(user_id)
-        user_data["consultation_active"] = True  # Оператор ответил, консультация продолжается
+        user_data["consultation_active"] = True  
         save_user_data(user_id, user_data)
 
+        await state.set_state(ConsultationState.waiting_for_operator_reply)  # Устанавливаем состояние ожидания ответа пользователя
+
         await message.answer("✅ Ответ отправлен пользователю.")
-        # Теперь пользователь может продолжить отправлять сообщения
     except ValueError:
         await message.answer("❌ Ошибка: Некорректный user_id.")
     except Exception as e:
