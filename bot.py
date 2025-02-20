@@ -5,7 +5,7 @@ import json
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
@@ -195,10 +195,6 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
     user_data = get_user_data(message.from_user.id)
 
     if user_data.get("consultation_active"):
-        reply_button = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Ответить", callback_data=f"reply_{message.from_user.id}")]
-        ])
-
         try:
             await bot.send_message(
                 SUPPORT_GROUP_ID,
@@ -208,31 +204,11 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
                 f"💬 {message.text}\n\n"
                 f"🆔 User ID: {message.from_user.id}",
                 parse_mode="Markdown",
-                reply_markup=reply_button
             )
         except Exception as e:
             logger.error(f"Ошибка пересылки сообщения оператору: {e}")
     else:
         await message.answer("Вы можете задать новый вопрос.")
-
-@dp.callback_query(F.data.startswith("reply_"))
-async def process_reply_button(callback: types.CallbackQuery, state: FSMContext):
-    user_id = int(callback.data.split("_")[1])
-
-    cancel_button = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel_reply")]
-        ]
-    )
-
-    await callback.message.answer(
-        f"✏️ Напишите ответ для пользователя {user_id}:",
-        reply_markup=cancel_button
-    )
-
-    # Update the FSM data using the injected state context
-    await state.update_data(reply_to=user_id)
-
 
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message, state: FSMContext):
