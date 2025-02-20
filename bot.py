@@ -51,8 +51,8 @@ start_kb = ReplyKeyboardMarkup(
 city_kb = ReplyKeyboardMarkup(
     keyboard=[[
         KeyboardButton(text="Калининград"),
-        KeyboardButton(text="Москва"),
-        KeyboardButton(text="Другой город"),
+        KeyboardButton(text="Другой регион"),
+        KeyboardButton(text="Другая страна"),
     ]],
     resize_keyboard=True,
 )
@@ -62,6 +62,10 @@ role_kb = ReplyKeyboardMarkup(
 )
 contact_kb = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="В чате"), KeyboardButton(text="По телефону")]],
+    resize_keyboard=True,
+)
+type_kb=ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Юрист"), KeyboardButton(text="Адвокат")]],
     resize_keyboard=True,
 )
 
@@ -98,6 +102,20 @@ async def ask_contact_method(message: types.Message):
     user_data = get_user_data(message.from_user.id)
     user_data["role"] = message.text
     save_user_data(message.from_user.id, user_data)
+    
+    explanation = (
+        "🔹 **Адвокат** – ведет уголовные дела, представляет в суде, оказывает защиту.\n"
+        "🔹 **Юрист** – консультации по договорам, недвижимости, бизнесу, оформлению документов, представляет в суде, оказывает защиту."
+    )
+    
+    await message.answer(f"Кто вам необходим?\n\n{explanation}", reply_markup=type_kb)
+
+@dp.message(F.text.in_(["Адвокат", "Юрист"]))
+async def ask_contact_method(message: types.Message):
+    user_data = get_user_data(message.from_user.id)
+    user_data["typeC"] = message.text
+    save_user_data(message.from_user.id, user_data)
+    
     await message.answer("Как вам удобнее получить консультацию?", reply_markup=contact_kb)
 
 @dp.message(F.text.in_(["В чате", "По телефону"]))
@@ -145,6 +163,7 @@ async def confirm_contact(message: types.Message, state: FSMContext, phone_input
         f"📞 Способ связи: {user_data.get('contact_method', 'Не указан')}\n"
         f"📛 Имя/Компания: {user_data.get('name', 'Не указано')}\n"
         f"📲 Телефон: {user_data.get('phone', 'Не указан')}\n"
+        f"📲 Необходим: {user_data.get('typeC', 'Не указан')}\n"
         f"💬 Запрос: {user_data.get('query', 'Не указан')}\n"
         f"🆔 User ID: {message.from_user.id}"
     )
