@@ -5,7 +5,7 @@ import json
 from dotenv import load_dotenv
 
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
@@ -104,8 +104,8 @@ async def ask_contact_method(message: types.Message):
     save_user_data(message.from_user.id, user_data)
     
     explanation = (
-        "🔹 **Адвокат** – ведет уголовные дела, представляет в суде, оказывает защиту.\n"
-        "🔹 **Юрист** – консультации по договорам, недвижимости, бизнесу, оформлению документов, представляет в суде, оказывает защиту."
+        "🔹 Адвокат – ведет уголовные дела, представляет в суде, оказывает защиту.\n"
+        "🔹 Юрист – консультации по договорам, недвижимости, бизнесу, оформлению документов, представляет в суде, оказывает защиту."
     )
     
     await message.answer(f"Кто вам необходим?\n\n{explanation}", reply_markup=type_kb)
@@ -124,10 +124,11 @@ async def ask_name(message: types.Message):
     user_data["contact_method"] = message.text
     save_user_data(message.from_user.id, user_data)
     
-    if user_data.get("role") == "Юр лицо":
-        await message.answer("Напишите название вашей компании.")
-    else:
-        await message.answer("Как к вам обращаться?")
+    await message.answer(
+        "Напишите название вашей компании." if user_data.get("role") == "Юр лицо" 
+        else "Как к вам обращаться?", 
+        reply_markup=ReplyKeyboardRemove()  
+    )
 
 @dp.message(lambda m: "name" not in get_user_data(m.from_user.id))
 async def ask_query(message: types.Message):
@@ -194,6 +195,11 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
     user_data = get_user_data(message.from_user.id)
 
     if user_data.get("consultation_active"):
+        reply_button = InlineKeyboardMarkup().add(
+            InlineKeyboardButton(
+                "Ответить", callback_data=f"reply_{message.from_user.id}"
+            )
+        )
         try:
             await bot.send_message(
                 SUPPORT_GROUP_ID,
@@ -203,11 +209,26 @@ async def forward_user_message_to_operator(message: types.Message, state: FSMCon
                 f"💬 {message.text}\n\n"
                 f"🆔 User ID: {message.from_user.id}",
                 parse_mode="Markdown",
+                reply_markup=reply_button
             )
         except Exception as e:
             logger.error(f"Ошибка пересылки сообщения оператору: {e}")
     else:
         await message.answer("Вы можете задать новый вопрос.")
+
+@dp.callback_query(F.data.startswith("reply_"))
+async def process_reply_button(callback: types.CallbackQuery):
+    user_id = int(callback.data.split("_")[1])
+    
+    await callback.message.answer(
+        f"✏️ Напишите ответ для пользователя {user_id}:",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("Отмена", callback_data="cancel_reply")
+        )
+    )
+
+    # Сохраняем user_id оператора для последующего ответа
+    await dp.current_state(user=callback.from_user.id).update_data(reply_to=user_id)
 
 @dp.message(Command("reply", ignore_case=True))
 async def operator_reply(message: types.Message, state: FSMContext):
