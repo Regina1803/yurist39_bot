@@ -90,11 +90,26 @@ async def start(message: types.Message):
 async def ask_city(message: types.Message):
     await message.answer("Из какого вы города?", reply_markup=city_kb)
 
+@dp.message(F.text.in_(["Другой регион", "Другая страна"]))
+async def ask_custom_city(message: types.Message):
+    await message.answer("Введите название вашего города:", reply_markup=ReplyKeyboardRemove())
+
+
+@dp.message(lambda m: get_user_data(m.from_user.id).get("city") is None)  # Ждем ввода города
+async def save_custom_city(message: types.Message):
+    user_data = get_user_data(message.from_user.id)
+    user_data["city"] = message.text
+    save_user_data(message.from_user.id, user_data)
+
+    await message.answer("Кем вы являетесь?", reply_markup=role_kb)
+
+
 @dp.message(F.text.in_(["Калининград", "Калининградская область", "Другой город"]))
 async def ask_role(message: types.Message):
     user_data = get_user_data(message.from_user.id)
     user_data["city"] = message.text
     save_user_data(message.from_user.id, user_data)
+    
     await message.answer("Кем вы являетесь?", reply_markup=role_kb)
 
 @dp.message(F.text.in_(["Физ лицо", "Юр лицо"]))
