@@ -14,7 +14,7 @@ from aiogram.fsm.storage.redis import RedisStorage
 # Загружаем переменные окружения
 load_dotenv()
 TOKEN = os.getenv("BOT_TOKEN")
-SUPPORT_GROUP_ID = int(os.getenv("SUPPORT_GROUP_ID"))
+SUPPORT_GROUP_ID = os.getenv("SUPPORT_GROUP_ID")
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=RedisStorage.from_url("redis://localhost:6379"))
